@@ -1,0 +1,128 @@
+<html>
+<head>
+</head>
+<body>
+<script>
+    window.onload = function () {
+
+        document.getElementById("control").setAttribute('transform', 'translate(' + (document.getElementById("map").clientWidth - 200) + ',' + (document.getElementById("map").clientHeight - 100) + ')');
+
+
+        window.ajax = function (url) {
+            xhr = new XMLHttpRequest();
+            xhr.open('GET', "/" + url, true);
+            xhr.send();
+        };
+        document.onkeydown = function (e) {
+            window.ajax(e.keyCode);
+        }
+
+        var socket = new WebSocket("ws://" + location.host + ":81");
+
+        socket.onopen = function () {
+            console.log("Соединение установлено.");
+        };
+
+        socket.onclose = function (event) {
+            document.getElementById("debug").innerHTML = "Нана ушел.";
+        };
+
+        socket.onmessage = function (event) {
+            try {
+                var d = JSON.parse(event.data);
+
+                document.getElementById("debug").innerHTML = event.data;
+
+                var x = d.x % (document.getElementById("map").clientWidth/2) + document.getElementById("map").clientWidth/2;
+                var y = d.y % (document.getElementById("map").clientHeight/2) + document.getElementById("map").clientHeight/2;
+
+                document.getElementById("nana").setAttribute('transform', 'translate(' + x + ',' + y + ') rotate(' + d.theta * 57.2958 + ')');
+
+            } catch (e) {
+                console.log(e);
+            }
+        };
+
+        socket.onerror = function (error) {
+
+        };
+    }
+</script>
+
+<svg id="map" version="1.1" xmlns="http://www.w3.org/2000/svg" width="100%" height="100%"
+     style="border: 1px solid black">
+    <style>
+        #nana {
+            fill-opacity: 0.5;
+            stroke-width: 1;
+            fill: red;
+            stroke: #000000;
+        }
+
+        line {
+            stroke: #000000;
+        }
+    </style>
+
+    <g>
+        <text x="20" y="10">
+            <tspan id="debug" dy="1em">Ожидаем НаНа...
+            </tspan>
+        </text>
+
+    </g>
+
+    <rect id="auto"
+          x=95% y=5%
+          width="50" height="50"
+          rx="5" ry="5"
+          fill="green"
+          onmousedown='window.ajax("38");'
+            />
+    <g id="control" transform="translate(100,800)">
+        <rect id="up"
+              x=55 y=-55
+              width="50" height="50"
+              rx="5" ry="5"
+              fill="gray"
+              onmousedown='window.ajax("38");'
+              onmouseup='window.ajax("32");'
+                />
+
+        <rect id="left"
+              width="50" height="50"
+              rx="5" ry="5"
+              fill="gray"
+              onmousedown='window.ajax("37");'
+              onmouseup='window.ajax("32");'
+                />
+        <rect id="down"
+              x=55 width="50"
+              height="50"
+              rx="5" ry="5"
+              fill="gray"
+              onmousedown='window.ajax("40");'
+              onmouseup='window.ajax("32");'
+                />
+        <rect id="right"
+              x=110 width="50"
+              height="50"
+              rx="5" ry="5"
+              fill="gray"
+              onmousedown='window.ajax("39");'
+              onmouseup='window.ajax("32");'
+                />
+    </g>
+    <g id="nana">
+        <circle cx="0" cy="0" r="12"/>
+        <line id="sensor" x1="0" y1="0" x2="320" y2="0"/>
+        <rect transform="rotate(90)" x="-8" y="-2.5" width="2" height="5"
+              style="fill:rgb(0,0,255);stroke-width:3;stroke:rgb(0,0,0)"/>
+        <rect transform="rotate(90)" x="6" y="-2.5" width="2" height="5"
+              style="fill:rgb(0,0,255);stroke-width:3;stroke:rgb(0,0,0)"/>
+    </g>
+</svg>
+
+</body>
+
+</html>
