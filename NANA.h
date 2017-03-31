@@ -3,12 +3,14 @@ int prev_left_ticks = 0;
 int right_ticks = 0;
 int prev_right_ticks = 0;
 
+int left_pwm = 0;
+int right_pwm = 0;
 
-int left_pwm_current = 0;
-int right_pwm_current = 0;
+#define min(X, Y) (((X)<(Y))?(X):(Y))
+#define max(X, Y) (((X)>(Y))?(X):(Y))
 
 void right_tick() {
-  if (right_pwm_current >= 0 ) {
+  if (right_pwm >= 0 ) {
     right_ticks++;
   } else {
     right_ticks--;
@@ -17,7 +19,7 @@ void right_tick() {
 }
 
 void left_tick() {
-  if (left_pwm_current >= 0 ) {
+  if (left_pwm >= 0 ) {
     left_ticks++;
   } else {
     left_ticks--;
@@ -27,33 +29,37 @@ void left_tick() {
 class NANA
 {
   public:
+    bool active = false;
+
     const int MPU_addr = 0x68;
-
-    int moving_mode = 0;
-    int switch_moving_mode_at = 0;
-
-    const int WAITING = 0;
-    const int SPIRAL = 1;
-    const int MOWER = 2;
-    const int WALL = 3;
 
     const int wheelDistance = 270;
     const float distancePerCount = 0.22;
 
+    static const  int map_size = 50;
+    //mm
+    int map_res = wheelDistance;
+
+    //-1 - obstacle
+    //0 - wasnt here
+    //1 - was here
+    //x,y
+    short room_map[map_size][map_size];
+
+    bool reach_map[map_size][map_size];
+
     float theta = 0;
 
-    float x = 0;
-    float y = 0;
+    int x_on_map = map_size / 2;
+    int y_on_map = map_size / 2;
 
-    //Время, за которое робот поворачивается на PI (180градусов)
-    const int PI_TIME = 1700;
-    //Время движения назад после срабатывания бампера
-    const int BACK_TIME = 300;
+    float x = x_on_map * map_res;
+    float y = y_on_map * map_res;
 
-    //Запланированое изменение скорости(направления) двигателей
-    int update_pwm_at = 0;
-    int left_pwm = 0;
-    int right_pwm = 0;
+    int x_goal = x_on_map;
+    int y_goal = y_on_map;
+
+    bool goal_selected = false;
 
     //Бампер
     const int bumper_pin_right = 16;
@@ -63,13 +69,16 @@ class NANA
 
     const int right_tick_pin = 12;
 
-    int turn_counter = 0;
-
-    int speed = 0;
-
     void loop() {
 
       updateOdometry();
+
+      x_on_map = (int)x / map_res;
+      y_on_map = (int)y / map_res;
+
+      //только, если не отмечено как препятствие
+      if (room_map[x_on_map][y_on_map] >= 0)
+        room_map[x_on_map][y_on_map] = 1;
 
       int voltage =   analogRead(A0);
 
@@ -77,60 +86,106 @@ class NANA
       debug += "\"t\": " + String(millis()) + ",\n";
       debug += "\"right_ticks\": " + String(right_ticks) + ",\n";
       debug += "\"left_ticks\": " + String(left_ticks) + ",\n";
+      debug += "\"left_pwm\": " + String(left_pwm) + ",\n";
+      debug += "\"right_pwm\": " + String(right_pwm) + ",\n";
       debug += "\"theta\": " + String(theta) + ",\n";
-      debug += "\"x\": " + String(x) + ",\n";
-      debug += "\"y\": " + String(y) + ",\n";
-      debug += "\"voltage\": " + String(voltage) + ",\n";
-      debug += "\"speed\": " + String(speed) + "\n";
+      debug += "\"x\": " + String(x_on_map) + ",\n";
+      debug += "\"y\": " + String(y_on_map) + ",\n";
+      debug += "\"x_goal\": " + String(x_goal) + ",\n";
+      debug += "\"y_goal\": " + String(y_goal) + ",\n";
+      debug += "\"voltage\": " + String(voltage) + "\n";
       debug += "}";
-
 
       webSocket.broadcastTXT(debug);
 
-      //Дальше только автоматические режимы
-      if (!moving_mode) {
+      bumper_read();
+
+      //только после нажатия на бампер
+      if (active) {
+        echo("active");
+
+        if (room_map[x_goal][y_goal] != 0) {
+          cleanAndSelectWay();
+        }
+
+        makeControl();
+      }
+
+    }
+
+    void makeControl() {
+
+      float theta_desired = atan2(y_goal - y_on_map, x_goal - x_on_map);
+
+      float Distance = sqrt(pow(x_goal - x_on_map, 2) + pow(y_goal - y_on_map, 2));
+
+      float theta_error = theta_desired - theta;
+
+      left_pwm = (int)Distance * 2048;
+      right_pwm = (int)Distance * 2048;
+
+      left_pwm = min(left_pwm, 4096);
+      left_pwm = max(left_pwm, 0);
+
+      if (left_pwm > 0 && left_pwm < 3000) {
+        left_pwm = 3000;
+      }
+
+
+      right_pwm = min(right_pwm, 4096);
+      right_pwm = max(right_pwm, 0);
+
+      if (right_pwm > 0 && right_pwm < 3000) {
+        right_pwm = 3000;
+      }
+
+      if (left_pwm && right_pwm) {
+        int k = 8128 / M_PI * theta_error;
+        left_pwm += k;
+        right_pwm -= k;
+      }
+
+      drive(left_pwm, right_pwm);
+    }
+
+    void cleanAndSelectWay() {
+      for (int i = 0; i < map_size; i++) {
+        for (int j = 0; j < map_size; j++) {
+          reach_map[i][j] = false;
+        }
+      }
+
+      goal_selected = false;
+      webSocket.broadcastTXT("current pos " + String(x_on_map) + ":" + String(y_on_map) + " " + String(room_map[x_on_map][y_on_map]));
+      selectWay(x_on_map, y_on_map);
+      webSocket.broadcastTXT("selected goal " + String(x_goal) + ":" + String(y_goal) + " " + String(room_map[x_goal][y_goal]));
+    }
+
+    void selectWay(int x, int y)
+    {
+      if (goal_selected)
+        return;
+
+      if (x < 0 || x >= map_size || y < 0 || y >= map_size)
+        return;
+
+      if (reach_map[x][y])
+        return;
+
+      //sector checked
+      reach_map[x][y] = true;
+
+      if (room_map[x][y] == 0) {
+        x_goal = x;
+        y_goal = y;
+        goal_selected = true;
         return;
       }
 
-      bumper_read();
-
-      //Плановое изменение режима
-      if (switch_moving_mode_at && switch_moving_mode_at < millis()) {
-        setDriveMode(moving_mode++ % 3);
-      }
-
-      if (update_pwm_at && update_pwm_at < millis() ) {
-        drive(left_pwm, right_pwm);
-        //Запланировать следующее
-        switch (moving_mode) {
-          case 1:
-            if (turn_counter % 2) {
-              left_pwm = -4096;
-              right_pwm = 4096;
-              update_pwm_at = millis() + floor(turn_counter / 4) * 1000;
-            } else {
-              left_pwm = 4096;
-              right_pwm = 4096;
-              update_pwm_at = millis() + PI_TIME / 2;
-            }
-            turn_counter++;
-
-            break;
-          case 2:
-            mower();
-
-            break;
-          case 3:
-            if (left_pwm != right_pwm) {
-              //              Выполняем поворот
-              //  Планируем ехать прямо до препятствия
-              left_pwm = 4096;
-              right_pwm = 4096;
-              update_pwm_at = millis() + BACK_TIME;
-            }
-            break;
-        }
-      }
+      selectWay(x + 1, y);
+      selectWay(x - 1, y);
+      selectWay(x, y + 1);
+      selectWay(x, y - 1);
     }
 
     void updateOdometry()
@@ -141,7 +196,7 @@ class NANA
       prev_right_ticks = right_ticks;
       prev_left_ticks = left_ticks;
 
-      float meanDistance = (SL + SR)/2;
+      float meanDistance = (SL + SR) / 2;
 
       x += meanDistance * cos(theta);
       y += meanDistance * sin(theta);
@@ -151,94 +206,15 @@ class NANA
         theta -= 2 * M_PI;
       else if (theta < -2 * M_PI)
         theta += 2 * M_PI;
-    }
 
-    void mower(boolean bumper = false) {
-      //Выполняется попорот. Запланировать ехать прямо
-      if ((left_pwm > 0 || right_pwm > 0) && left_pwm != right_pwm) {
-        left_pwm = 4096;
-        right_pwm = 4096;
-        update_pwm_at = millis() + PI_TIME / 2;
-      } else {
-        //Едем прямо, запланировать поворот
-        switch (turn_counter % 4) {
-          case 0:
-            //Вправо на 90
-            left_pwm = 4096;
-            right_pwm = -4096;
-            update_pwm_at = millis() + 60000;
-            break;
-          case 1:
-            //Вправо на 90
-            left_pwm = 4096;
-            right_pwm = -4096;
-            update_pwm_at = millis() + PI_TIME;
-            break;
-          case 2:
-            //Влево на 90
-            left_pwm = -4096;
-            right_pwm = 4096;
-            update_pwm_at = millis() + 60000;
-            break;
-          case 3:
-            //Влево на 90
-            left_pwm = -4096;
-            right_pwm = 4096;
-            update_pwm_at = millis() + PI_TIME;
-            break;
-        }
-        if (bumper) {
-          update_pwm_at = millis() + BACK_TIME;
-        } else {
-          turn_counter++;
-        }
+      float x_pred = (x + map_res * cos(theta)) / map_res;
+      float y_pred = (y + map_res * sin(theta)) / map_res;
+
+      if ( x_pred < 0 || y_pred < 0 || x_pred > map_size || y_pred > map_size ) {
+        bumper();
       }
     }
 
-    void setDriveMode(int m) {
-      turn_counter = 0;
-      switch (m) {
-        case 1:
-          left_pwm = 4096;
-          right_pwm = 4096;
-
-          drive(left_pwm, right_pwm);
-
-          update_pwm_at = millis() + 1000;
-
-          moving_mode = SPIRAL;
-
-          switch_moving_mode_at = millis() + 60000;
-
-          break;
-        case 2:
-          left_pwm = -4096;
-          right_pwm = -4096;
-          drive(left_pwm, right_pwm);
-          moving_mode = MOWER;
-
-          //Через секунд делаем левый поворот - начало
-          left_pwm = -4096;
-          right_pwm = 4096;
-          update_pwm_at = millis() + BACK_TIME;
-
-          switch_moving_mode_at = millis() + 300000;
-          break;
-        case 3:
-          left_pwm = 4096;
-          right_pwm = 4096;
-          drive(left_pwm, right_pwm);
-          moving_mode = WALL;
-
-          switch_moving_mode_at = millis() + 10000;
-          break;
-        default:
-          drive(0, 0);
-          moving_mode = WAITING;
-
-          switch_moving_mode_at = 0;
-      }
-    }
 
     void setup() {
       pinMode(bumper_pin_right, INPUT);
@@ -249,6 +225,8 @@ class NANA
 
       attachInterrupt(right_tick_pin, right_tick, FALLING);
       attachInterrupt(left_tick_pin, left_tick, FALLING);
+
+      drive(0, 0);
     }
 
     boolean bumper_read() {
@@ -256,44 +234,28 @@ class NANA
       boolean bumber_left = digitalRead(bumper_pin_left) == HIGH;
 
       if (bumber_right || bumber_left) {
-        switch (moving_mode) {
-          case 0:
-            break;
-          case 1:
-            setDriveMode(MOWER);
-            break;
-          case 2:
-            left_pwm = -4096;
-            right_pwm = -4096;
-            drive(left_pwm, right_pwm);
-            mower(true);
-            break;
-          case 3:
-            //          Едем назад
-            left_pwm = -4096;
-            right_pwm = -4096;
-            drive(left_pwm, right_pwm);
-
-            if (bumber_right) {
-              left_pwm = -4096;
-              right_pwm = 4096;
-            } else {
-              left_pwm = 4096;
-              right_pwm = -4096;
-            }
-
-            update_pwm_at = millis() + BACK_TIME;
-            break;
-        }
+        //Начинает работать только после нажатия на бампер
+        active = true;
+        bumper();
       }
-
 
       return bumber_right || bumber_left;
     }
 
+    void bumper() {
+      float x_pred = x_on_map + cos(theta);
+      float y_pred = y_on_map + sin(theta);
+
+      if ( !(x_pred < 0 || y_pred < 0 || x_pred > map_size || y_pred > map_size) ) {
+        room_map[round(x_pred)][round(y_pred)] = -1;
+        cleanAndSelectWay();
+      }
+
+    }
+
     void drive(int left, int right) {
-      left_pwm_current = left;
-      right_pwm_current = right;
+      left_pwm = left;
+      right_pwm = right;
       //Левое
       if (left > 0) {
         pwm.setPWM(4, 4096, 0);
