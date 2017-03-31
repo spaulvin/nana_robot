@@ -56,8 +56,8 @@ class NANA
     float x = x_on_map * map_res;
     float y = y_on_map * map_res;
 
-    int x_goal = x_on_map;
-    int y_goal = y_on_map;
+    int x_goal = false;
+    int y_goal = false;
 
     bool goal_selected = false;
 
@@ -104,8 +104,8 @@ class NANA
       if (active) {
         echo("active");
 
-        if (room_map[x_goal][y_goal] != 0) {
-          cleanAndSelectWay();
+        if (x_on_map == x_goal && y_on_map == y_goal) {
+          traverse();
         }
 
         makeControl();
@@ -119,7 +119,9 @@ class NANA
 
       float Distance = sqrt(pow(x_goal - x_on_map, 2) + pow(y_goal - y_on_map, 2));
 
-      float theta_error = theta_desired - theta;
+      float theta_error = theta - theta_desired;
+
+      theta_error = normalizeTheta(theta_error);
 
       left_pwm = (int)Distance * 2048;
       right_pwm = (int)Distance * 2048;
@@ -127,20 +129,11 @@ class NANA
       left_pwm = min(left_pwm, 4096);
       left_pwm = max(left_pwm, 0);
 
-      if (left_pwm > 0 && left_pwm < 3000) {
-        left_pwm = 3000;
-      }
-
-
       right_pwm = min(right_pwm, 4096);
       right_pwm = max(right_pwm, 0);
 
-      if (right_pwm > 0 && right_pwm < 3000) {
-        right_pwm = 3000;
-      }
-
       if (left_pwm && right_pwm) {
-        int k = 8128 / M_PI * theta_error;
+        int k = 4096 / M_PI * theta_error;
         left_pwm += k;
         right_pwm -= k;
       }
@@ -148,44 +141,18 @@ class NANA
       drive(left_pwm, right_pwm);
     }
 
-    void cleanAndSelectWay() {
-      for (int i = 0; i < map_size; i++) {
-        for (int j = 0; j < map_size; j++) {
-          reach_map[i][j] = false;
-        }
-      }
-
-      goal_selected = false;
-      webSocket.broadcastTXT("current pos " + String(x_on_map) + ":" + String(y_on_map) + " " + String(room_map[x_on_map][y_on_map]));
-      selectWay(x_on_map, y_on_map);
-      webSocket.broadcastTXT("selected goal " + String(x_goal) + ":" + String(y_goal) + " " + String(room_map[x_goal][y_goal]));
+    bool avoidObstacle() {
+      float target_theta = theta + M_PI / 2;
+      target_theta = normalizeTheta(target_theta);
+      x_goal = floor(x_on_map + cos(target_theta));
+      y_goal = floor(y_on_map + sin(target_theta));
     }
 
-    void selectWay(int x, int y)
-    {
-      if (goal_selected)
-        return;
-
-      if (x < 0 || x >= map_size || y < 0 || y >= map_size)
-        return;
-
-      if (reach_map[x][y])
-        return;
-
-      //sector checked
-      reach_map[x][y] = true;
-
-      if (room_map[x][y] == 0) {
-        x_goal = x;
-        y_goal = y;
-        goal_selected = true;
-        return;
-      }
-
-      selectWay(x + 1, y);
-      selectWay(x - 1, y);
-      selectWay(x, y + 1);
-      selectWay(x, y - 1);
+    void traverse() {
+      float target_theta = theta;
+      target_theta = normalizeTheta(target_theta);
+      x_goal = floor(x_on_map + cos(target_theta));
+      y_goal = floor(y_on_map + sin(target_theta));
     }
 
     void updateOdometry()
@@ -202,10 +169,7 @@ class NANA
       y += meanDistance * sin(theta);
       theta += (SR - SL) / wheelDistance;
 
-      if (theta > 2 * M_PI)
-        theta -= 2 * M_PI;
-      else if (theta < -2 * M_PI)
-        theta += 2 * M_PI;
+      theta = normalizeTheta(theta);
 
       float x_pred = (x + map_res * cos(theta)) / map_res;
       float y_pred = (y + map_res * sin(theta)) / map_res;
@@ -213,6 +177,16 @@ class NANA
       if ( x_pred < 0 || y_pred < 0 || x_pred > map_size || y_pred > map_size ) {
         bumper();
       }
+    }
+
+    float normalizeTheta(float th) {
+      //      theta between 0 and 2PI
+      while (th >= 2 * M_PI)
+        th -= 2 * M_PI;
+      while (th < 0)
+        th +=  2 * M_PI;
+
+      return th;
     }
 
 
@@ -248,7 +222,7 @@ class NANA
 
       if ( !(x_pred < 0 || y_pred < 0 || x_pred > map_size || y_pred > map_size) ) {
         room_map[round(x_pred)][round(y_pred)] = -1;
-        cleanAndSelectWay();
+        avoidObstacle();
       }
 
     }
@@ -286,6 +260,13 @@ class NANA
       }
       if (right > 4096) {
         right = 4096;
+      }
+      if (left > 0 && left < 3000) {
+        left = 3000;
+      }
+
+      if (right > 0 && right < 3000) {
+        right = 3000;
       }
 
       //Скорость
