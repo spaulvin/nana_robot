@@ -49,6 +49,7 @@ class NANA
     bool reach_map[map_size][map_size];
 
     float theta = 0;
+    float theta_d = 0;
 
     int x_on_map = map_size / 2;
     int y_on_map = map_size / 2;
@@ -89,6 +90,7 @@ class NANA
       debug += "\"left_pwm\": " + String(left_pwm) + ",\n";
       debug += "\"right_pwm\": " + String(right_pwm) + ",\n";
       debug += "\"theta\": " + String(theta) + ",\n";
+      debug += "\"theta_d\": " + String(theta_d) + ",\n";
       debug += "\"x\": " + String(x_on_map) + ",\n";
       debug += "\"y\": " + String(y_on_map) + ",\n";
       debug += "\"x_goal\": " + String(x_goal) + ",\n";
@@ -116,24 +118,25 @@ class NANA
     void makeControl() {
 
       float theta_desired = atan2(y_goal - y_on_map, x_goal - x_on_map);
+      theta_d = theta_desired;
 
       float Distance = sqrt(pow(x_goal - x_on_map, 2) + pow(y_goal - y_on_map, 2));
 
-      float theta_error = theta - theta_desired;
+      float theta_error = theta_desired - theta;
 
       theta_error = normalizeTheta(theta_error);
 
-      left_pwm = (int)Distance * 2048;
-      right_pwm = (int)Distance * 2048;
+      left_pwm = (int)Distance * 4095;
+      right_pwm = (int)Distance * 4095;
 
-      left_pwm = min(left_pwm, 4096);
+      left_pwm = min(left_pwm, 4095);
       left_pwm = max(left_pwm, 0);
 
-      right_pwm = min(right_pwm, 4096);
+      right_pwm = min(right_pwm, 4095);
       right_pwm = max(right_pwm, 0);
 
       if (left_pwm && right_pwm) {
-        int k = 4096 / M_PI * theta_error;
+        int k = 4095 / M_PI  * theta_error;
         left_pwm += k;
         right_pwm -= k;
       }
@@ -144,15 +147,15 @@ class NANA
     bool avoidObstacle() {
       float target_theta = theta + M_PI / 2;
       target_theta = normalizeTheta(target_theta);
-      x_goal = floor(x_on_map + cos(target_theta));
-      y_goal = floor(y_on_map + sin(target_theta));
+      x_goal = round(x_on_map + cos(target_theta));
+      y_goal = round(y_on_map + sin(target_theta));
     }
 
     void traverse() {
       float target_theta = theta;
       target_theta = normalizeTheta(target_theta);
-      x_goal = floor(x_on_map + cos(target_theta));
-      y_goal = floor(y_on_map + sin(target_theta));
+      x_goal = ceil(x_on_map + cos(target_theta));
+      y_goal = ceil(y_on_map + sin(target_theta));
     }
 
     void updateOdometry()
@@ -180,11 +183,11 @@ class NANA
     }
 
     float normalizeTheta(float th) {
-      //      theta between 0 and 2PI
-      while (th >= 2 * M_PI)
+      //      theta between -PI and PI (https://youtu.be/ky-sIvvQFXM?t=174)
+      while (th > M_PI)
         th -= 2 * M_PI;
-      while (th < 0)
-        th +=  2 * M_PI;
+      while (th < -M_PI)
+        th += 2 * M_PI;
 
       return th;
     }
@@ -221,7 +224,7 @@ class NANA
       float y_pred = y_on_map + sin(theta);
 
       if ( !(x_pred < 0 || y_pred < 0 || x_pred > map_size || y_pred > map_size) ) {
-        room_map[round(x_pred)][round(y_pred)] = -1;
+        room_map[(int)ceil(x_pred)][(int)ceil(y_pred)] = -1;
         avoidObstacle();
       }
 
@@ -255,32 +258,14 @@ class NANA
 
       left = abs(left);
       right = abs(right);
-      if (left > 4096) {
-        left = 4096;
-      }
-      if (right > 4096) {
-        right = 4096;
-      }
-      if (left > 0 && left < 3000) {
-        left = 3000;
-      }
 
-      if (right > 0 && right < 3000) {
-        right = 3000;
-      }
+      left = min(left, 4095);
+      right = min(right, 4095);
 
       //Скорость
-      if (left == 4096) {
-        pwm.setPWM(0, left, 0);
-      } else {
-        pwm.setPWM(0, 0, left);
-      }
+      pwm.setPWM(0, 0, left);
 
-      if (right == 4096) {
-        pwm.setPWM(5, right, 0);
-      } else {
-        pwm.setPWM(5, 0, right);
-      }
+      pwm.setPWM(5, 0, right);
 
     }
 
