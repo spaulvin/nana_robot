@@ -106,7 +106,7 @@ class NANA
       if (active) {
         echo("active");
 
-        if (x_on_map == x_goal && y_on_map == y_goal) {
+        if ((x_on_map == x_goal && y_on_map == y_goal)) {
           traverse();
         }
 
@@ -116,30 +116,17 @@ class NANA
     }
 
     void makeControl() {
-
-      float theta_desired = atan2(y_goal - y_on_map, x_goal - x_on_map);
+      float theta_desired = atan2(y_goal*map_res - y, x_goal*map_res - x);
       theta_d = theta_desired;
-
-      float Distance = sqrt(pow(x_goal - x_on_map, 2) + pow(y_goal - y_on_map, 2));
 
       float theta_error = theta_desired - theta;
 
-      theta_error = normalizeTheta(theta_error);
+      left_pwm = 4095;
+      right_pwm = 4095;
 
-      left_pwm = (int)Distance * 4095;
-      right_pwm = (int)Distance * 4095;
-
-      left_pwm = min(left_pwm, 4095);
-      left_pwm = max(left_pwm, 0);
-
-      right_pwm = min(right_pwm, 4095);
-      right_pwm = max(right_pwm, 0);
-
-      if (left_pwm && right_pwm) {
-        int k = 4095 / M_PI  * theta_error;
-        left_pwm += k;
-        right_pwm -= k;
-      }
+      int k = 8128 / M_PI  * theta_error;
+      left_pwm += k;
+      right_pwm -= k;
 
       drive(left_pwm, right_pwm);
     }
