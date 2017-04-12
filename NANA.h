@@ -104,7 +104,7 @@ class NANA
 
       //только после нажатия на бампер
       if (active) {
-        echo("active");
+        //echo("active");
 
         if ((x_on_map == x_goal && y_on_map == y_goal)) {
           traverse();
@@ -116,7 +116,7 @@ class NANA
     }
 
     void makeControl() {
-      float theta_desired = atan2(y_goal*map_res - y, x_goal*map_res - x);
+      float theta_desired = atan2(y_goal * map_res - y, x_goal * map_res - x);
       theta_d = theta_desired;
 
       float theta_error = theta_desired - theta;
@@ -124,11 +124,16 @@ class NANA
       left_pwm = 4095;
       right_pwm = 4095;
 
-      int k = 8128 / M_PI  * theta_error;
+      int k = 8128
+      
+      / M_PI  * theta_error;
       left_pwm += k;
       right_pwm -= k;
 
       drive(left_pwm, right_pwm);
+
+      //     TODO: left spinnint full back, right not spinnin why?
+      //      drive(-64, 8254);
     }
 
     bool avoidObstacle() {
@@ -243,16 +248,26 @@ class NANA
         pwm.setPWM(1, 4096, 0);
       }
 
-      left = abs(left);
-      right = abs(right);
-
-      left = min(left, 4095);
-      right = min(right, 4095);
 
       //Скорость
-      pwm.setPWM(0, 0, left);
+      if (left < 1000) {
+        pwm.setPWM(0, 0, 1);
+      } else if (left < 2000) {
+        pwm.setPWM(0, 0, 3000);
+      } else {
+        pwm.setPWM(0, 0, 4095);
+      }
 
-      pwm.setPWM(5, 0, right);
+      if (right < 1000) {
+        pwm.setPWM(5, 0, 1);
+      } else if (right < 2000) {
+        pwm.setPWM(5, 0, 3000);
+      } else {
+        pwm.setPWM(5, 0, 3000);
+      }
+      //      pwm.setPWM(0, 0, left);
+
+      //      pwm.setPWM(5, 0, right);
 
     }
 
