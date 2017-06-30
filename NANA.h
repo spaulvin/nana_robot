@@ -30,35 +30,19 @@ class NANA {
   public:
     bool active = false;
 
-    const int MPU_addr = 0x68;
-
     const int wheelDistance = 270;
     const float distancePerCount = 0.22;
 
-    static const int map_size = 50;
-    //mm
-    int map_res = wheelDistance;
-
-    //-1 - obstacle
-    //0 - wasnt here
-    //1 - was here
-    //x,y
-    short room_map[map_size][map_size];
-
+    //Угол отклонения от цели [-pi,pi]
     float theta = 0;
-    float theta_d = 0;
+    //Скорость [-4095,4095]
+    int speed = 0;
+    //Общая пройденая дистанция, независимо от направления
+    float distance = 0;
+    float last_distance = distance;
 
-    int x_on_map = map_size / 2;
-    int y_on_map = map_size / 2;
-
-    float x = x_on_map * map_res;
-    float y = y_on_map * map_res;
-
-    int x_goal = false;
-    int y_goal = false;
-
-    int x_pred = x_on_map;
-    int y_pred = y_on_map;
+    int next_distance = -1;
+    bool update_on_angle = false;
 
     //Бампер
     const int bumper_pin_right = 16;
@@ -67,6 +51,10 @@ class NANA {
     const int left_tick_pin = 13;
 
     const int right_tick_pin = 12;
+
+    int bumberCounter = 0;
+
+    bool prevBumperPressed = false;
 
     void loop() {
 
@@ -80,70 +68,90 @@ class NANA {
       if (active) {
         echo("active");
 
-        if ((x_on_map == x_goal && y_on_map == y_goal)) {
-          selectNewGoal();
+        //Включить щетки
+        pwm.setPWM(6, 4096, 0);
+
+        if ((!update_on_angle && next_distance > 0 && next_distance <= distance) || (update_on_angle && theta < 0.1 && theta > -0.1)) {
+          mower();
         }
 
         makeControl();
+      } else {
+        pwm.setPWM(6, 0, 4096);
       }
 
+    }
+
+    void mower(boolean bumper = false) {
+      if (bumper) {
+        speed = -4096;
+        next_distance = distance + wheelDistance / 4;
+        update_on_angle = false;
+      } else {
+        if (update_on_angle) {
+          speed = 4096;
+          update_on_angle = false;
+          next_distance = distance + 20 * wheelDistance;
+        } else {
+          theta = random(M_PI*1000)/1000.0;
+          theta = random(10) <=3 ? -theta : theta;
+          speed = 0;
+          update_on_angle = true;
+          next_distance = -1;
+        }
+
+
+        last_distance = distance;
+      }
     }
 
     void sendDebug() {
       int voltage = analogRead(A0);
 
       String debug = "{\n";
+      debug += "\"type\": \"debug\",\n";
       debug += "\"t\": " + String(millis()) + ",\n";
-      debug += "\"right_ticks\": " + String(right_ticks) + ",\n";
-      debug += "\"left_ticks\": " + String(left_ticks) + ",\n";
+      debug += "\"distance\": " + String(distance) + ",\n";
       debug += "\"left_pwm\": " + String(left_pwm) + ",\n";
       debug += "\"right_pwm\": " + String(right_pwm) + ",\n";
       debug += "\"theta\": " + String(theta) + ",\n";
-      debug += "\"theta_d\": " + String(theta_d) + ",\n";
-      debug += "\"x\": " + String(x_on_map) + ",\n";
-      debug += "\"y\": " + String(y_on_map) + ",\n";
-      debug += "\"x_goal\": " + String(x_goal) + ",\n";
-      debug += "\"y_goal\": " + String(y_goal) + ",\n";
       debug += "\"voltage\": " + String(voltage) + "\n";
       debug += "}";
 
       webSocket.broadcastTXT(debug);
     }
 
+    void consoleLog(String message) {
+      String debug = "{\n";
+      debug += "\"type\": \"consoleLog\" ,\n";
+      debug += "\"message\": \"" + String(message) + "\"\n";
+      debug += "}";
+
+      webSocket.broadcastTXT(debug);
+    }
+
     void makeControl() {
-      theta_d = atan2(y_goal * map_res - y, x_goal * map_res - x);
+      left_pwm = speed;
+      right_pwm = speed;
 
-      float theta_error = theta_d - theta;
+      int k = abs(8190 / M_PI * theta);
 
-      theta_error = max(-2 * M_PI, theta_error);
-      theta_error = min(2 * M_PI, theta_error);
-
-      left_pwm = 4095;
-      right_pwm = 4095;
-
-      int k = 8190 / M_PI * theta_error;
-
-      if (k > 0) {
+      if (theta < 0) {
+        //Поворачивать против часовой стрелки
         left_pwm -= k;
-      } else if (k < 0) {
         right_pwm += k;
+      } else {
+        //По часовой стрелке
+        left_pwm += k;
+        right_pwm -= k;
       }
 
       drive(left_pwm, right_pwm);
-
-      //     TODO: left spinnint full back, right not spinnin why?
-      //      drive(-64, 8254);
     }
 
     bool avoidObstacle() {
-      float target_theta = theta + M_PI / 2;
-      x_goal = round(x_on_map + cos(target_theta));
-      y_goal = round(y_on_map + sin(target_theta));
-    }
-
-    void selectNewGoal() {
-      x_goal = round(x_on_map + cos(theta));
-      y_goal = round(y_on_map + sin(theta));
+      consoleLog("avoidObstacle" + String(bumberCounter));
+      mower(true);
     }
 
     void updateOdometry() {
@@ -154,26 +162,11 @@ class NANA {
       prev_left_ticks = left_ticks;
 
       float meanDistance = (SL + SR) / 2;
+      distance += abs(meanDistance);
 
-      x += meanDistance * cos(theta);
-      y += meanDistance * sin(theta);
       theta += (SR - SL) / wheelDistance;
 
       theta = normalizeTheta(theta);
-
-      x_on_map = (int) (x / map_res);
-      y_on_map = (int) (y / map_res);
-
-      //только, если не отмечено как препятствие
-      if (room_map[x_on_map][y_on_map] >= 0)
-        room_map[x_on_map][y_on_map] = 1;
-
-      x_pred = ceil(x_on_map + cos(theta));
-      y_pred = ceil(y_on_map + sin(theta));
-
-      if (x_pred < 0 || y_pred < 0 || x_pred > map_size || y_pred > map_size) {
-        bumper();
-      }
     }
 
     float normalizeTheta(float th) {
@@ -206,32 +199,42 @@ class NANA {
 
       if (bumber_right || bumber_left) {
         //Начинает работать только после нажатия на бампер
-        active = true;
-        bumper();
+        if (!prevBumperPressed) {
+          active = true;
+          avoidObstacle();
+        }
+
+        prevBumperPressed = true;
+      } else {
+        prevBumperPressed = false;
       }
 
       return bumber_right || bumber_left;
     }
 
-    void bumper() {
-      if (!(x_pred < 0 || y_pred < 0 || x_pred > map_size || y_pred > map_size)) {
-        room_map[x_pred][y_pred] = -1;
-      }
-      avoidObstacle();
-    }
-
     void drive(int left, int right) {
+
       //Левое
       setMotorRotation(4, 3, left);
 
       //Правое
       setMotorRotation(2, 1, right);
 
+      uint16_t l = min(4095, abs(left));
+      uint16_t r = min(4095, abs(right));
+
+      if (l > 0 && l < 3000) {
+        l = 3000;
+      }
+
+      if (r > 0 && r < 3000) {
+        r = 3000;
+      }
+
       //Скорость
-      pwm.setPWM(0, 0, max(4095, abs(left)));
+      pwm.setPWM(0, 0, r);
 
-      pwm.setPWM(5, 0, max(4095, abs(right)));
-
+      pwm.setPWM(5, 0, l);
     }
 
     void setMotorRotation(uint8_t pinA, uint8_t pinB, int spd) {

@@ -31,12 +31,14 @@
             try {
                 var d = JSON.parse(event.data);
 
-                document.getElementById("debug").innerHTML = event.data;
-
-                var x = d.x % (document.getElementById("map").clientWidth/2) + document.getElementById("map").clientWidth/2;
-                var y = d.y % (document.getElementById("map").clientHeight/2) + document.getElementById("map").clientHeight/2;
-
-                document.getElementById("nana").setAttribute('transform', 'translate(' + x + ',' + y + ') rotate(' + d.theta * 57.2958 + ')');
+                switch (d.type) {
+                    case "debug":
+                        document.getElementById("debug").innerHTML = event.data;
+                        document.getElementById("nana").setAttribute('transform', 'rotate(' + d.theta * 57.2958 + ')');
+                        break;
+                    default:
+                        console.log(d);
+                }
 
             } catch (e) {
                 console.log(event.data);

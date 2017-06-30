@@ -42,17 +42,6 @@ void space() {
   web_server.send(200, "text/html", "ok");
 }
 
-void show_map() {
-  String room_map = "";
-  for (int i = 0; i < nana.map_size ; i++) {
-    for (int j = 0; j < nana.map_size ; j++) {
-      room_map += String(nana.room_map[i][j]);
-    }
-    room_map += "<br>";
-  }
-  web_server.send(200, "text/html", room_map);
-}
-
 void web_setup() {
   web_server.on("/", handleRoot);
 
@@ -62,8 +51,6 @@ void web_setup() {
   web_server.on("/38", up);
   web_server.on("/39", right);
   web_server.on("/40", down);
-
-  web_server.on("/map", show_map);
 
   web_server.begin();
 }
