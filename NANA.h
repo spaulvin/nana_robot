@@ -242,14 +242,6 @@ class NANA {
       uint16_t l = min(4095, abs(left));
       uint16_t r = min(4095, abs(right));
 
-      if (l > 0 && l < 3000) {
-        l = 3000;
-      }
-
-      if (r > 0 && r < 3000) {
-        r = 3000;
-      }
-
       //Скорость
       pwm.setPWM(0, 0, r);
 
