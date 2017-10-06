@@ -1,3 +1,5 @@
+#include "PID_v1.h"
+#include "user_interface.h"
 int left_ticks = 0;
 int prev_left_ticks = 0;
 int right_ticks = 0;
@@ -5,6 +7,24 @@ int prev_right_ticks = 0;
 
 int left_pwm = 0;
 int right_pwm = 0;
+//Всегда стремимся к 0 градусов
+double thSet = 0;
+double thOut = 0;
+
+//Угол отклонения от цели [-pi,pi]
+double theta = 0;
+
+//Скорость [-4095,4095]
+int speed = 0;
+
+int ti = 0;           // tic timer counter
+
+double kp = 0.5, ki = 10, kd = 0.0;
+//PID(&Input, &Output, &Setpoint, Kp, Ki, Kd, Direction)
+PID thPID(&theta, &thOut, &thSet, kp, ki, kd, DIRECT);
+
+static os_timer_t myTimer;
+int period = 50;
 
 #define min(X, Y) (((X)<(Y))?(X):(Y))
 #define max(X, Y) (((X)>(Y))?(X):(Y))
@@ -26,6 +46,19 @@ void left_tick() {
   }
 }
 
+
+void tic(void *pArg) {
+  thPID.Compute();
+
+  left_pwm = speed;
+  right_pwm = speed;
+
+  left_pwm -= thOut;
+  right_pwm += thOut;
+
+  ti += 1;                // tic counter
+}
+
 class NANA {
   public:
     bool active = false;
@@ -33,10 +66,6 @@ class NANA {
     const int wheelDistance = 270;
     const float distancePerCount = 0.22;
 
-    //Угол отклонения от цели [-pi,pi]
-    float theta = 0;
-    //Скорость [-4095,4095]
-    int speed = 0;
     //Общая пройденая дистанция, независимо от направления
     float distance = 0;
     float last_distance = distance;
@@ -75,7 +104,8 @@ class NANA {
           mower();
         }
 
-        makeControl();
+        drive(left_pwm,right_pwm);
+
       } else {
         pwm.setPWM(6, 0, 4096);
       }
@@ -93,8 +123,8 @@ class NANA {
           update_on_angle = false;
           next_distance = distance + 20 * wheelDistance;
         } else {
-          theta = random(M_PI*1000)/1000.0;
-          theta = random(10) <=3 ? -theta : theta;
+          theta = random(M_PI * 1000) / 1000.0;
+          theta = random(10) <= 3 ? -theta : theta;
           speed = 0;
           update_on_angle = true;
           next_distance = -1;
@@ -128,25 +158,6 @@ class NANA {
       debug += "}";
 
       webSocket.broadcastTXT(debug);
-    }
-
-    void makeControl() {
-      left_pwm = speed;
-      right_pwm = speed;
-
-      int k = abs(8190 / M_PI * theta);
-
-      if (theta < 0) {
-        //Поворачивать против часовой стрелки
-        left_pwm -= k;
-        right_pwm += k;
-      } else {
-        //По часовой стрелке
-        left_pwm += k;
-        right_pwm -= k;
-      }
-
-      drive(left_pwm, right_pwm);
     }
 
     bool avoidObstacle() {
@@ -189,6 +200,14 @@ class NANA {
 
       attachInterrupt(right_tick_pin, right_tick, FALLING);
       attachInterrupt(left_tick_pin, left_tick, FALLING);
+
+      sei();                                  // Enable interrupts
+      os_timer_setfn(&myTimer, tic, NULL);
+      os_timer_arm(&myTimer, period, true);   // timer in ms
+
+      thPID.SetSampleTime(period);
+      thPID.SetOutputLimits(-4096, 4096);
+      thPID.SetMode(AUTOMATIC);
 
       drive(0, 0);
     }
